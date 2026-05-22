@@ -1,5 +1,9 @@
 # policy
 
+[![ci](https://github.com/pilot-protocol/policy/actions/workflows/ci.yml/badge.svg)](https://github.com/pilot-protocol/policy/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/pilot-protocol/policy/branch/main/graph/badge.svg)](https://codecov.io/gh/pilot-protocol/policy)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
 Policy plugin and expression language for the Pilot Protocol daemon.
 The repo ships two packages:
 
@@ -57,3 +61,7 @@ rt.Register(policy.NewService(policy.Config{
 | Tag | Effect |
 |---|---|
 | `no_policy` | Compiles a stub whose `Start` is a no-op. |
+
+## License
+
+AGPL-3.0-or-later. See [LICENSE](LICENSE).
