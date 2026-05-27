@@ -224,6 +224,16 @@ func runProgram(prog *vm.Program, ctx map[string]interface{}) (bool, error) {
 	}
 	ch := make(chan result, 1)
 	go func() {
+		// expr.Run can panic on malformed programs or context drift
+		// (compile-vs-run schema mismatch). Without this recover the
+		// panic propagates up the goroutine and crashes the daemon —
+		// a policy reload becomes a crash vector. Wrap once at the
+		// only call site so the timeout path also sees the result.
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- result{nil, fmt.Errorf("expression panic: %v", r)}
+			}
+		}()
 		out, err := expr.Run(prog, ctx)
 		ch <- result{out, err}
 	}()
