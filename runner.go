@@ -350,11 +350,22 @@ func (pr *PolicyRunner) executeEvict(ctx map[string]interface{}) {
 }
 
 func (pr *PolicyRunner) executeEvictWhere(d Directive, actionIdx int) {
-	pr.mu.Lock()
-	defer pr.mu.Unlock()
+	// Snapshot the peer list under read lock. Per-peer policy evaluation
+	// (via EvaluatePeerExpr → runProgram) has a 100 ms timeout per peer.
+	// Holding the write lock across O(N) evaluations blocks every other
+	// pr.mu acquirer (reconcileMembership, applyMembershipDiff, entire
+	// runCycle body). For a network with 1 000 peers worst case the lock
+	// was held for ~100 s. Snapshot + release + re-acquire briefly keeps
+	// the write-critical section O(1) regardless of peer count.
+	pr.mu.RLock()
+	snapshot := make([]*managedPeer, 0, len(pr.peers))
+	for _, p := range pr.peers {
+		snapshot = append(snapshot, p)
+	}
+	pr.mu.RUnlock()
 
 	var toEvict []uint32
-	for _, p := range pr.peers {
+	for _, p := range snapshot {
 		peerCtx := map[string]interface{}{
 			"peer_id":    int(p.NodeID),
 			"peer_tags":  mergeTags(p.RegistryTags, p.tags()),
@@ -371,6 +382,14 @@ func (pr *PolicyRunner) executeEvictWhere(d Directive, actionIdx int) {
 		}
 	}
 
+	if len(toEvict) == 0 {
+		return
+	}
+
+	// Re-acquire the write lock briefly to apply evictions. Peers that
+	// were concurrently removed between the snapshot and this lock are
+	// harmless — delete on a non-existent key is a no-op.
+	pr.mu.Lock()
 	now := time.Now()
 	for _, id := range toEvict {
 		delete(pr.peers, id)
@@ -378,10 +397,10 @@ func (pr *PolicyRunner) executeEvictWhere(d Directive, actionIdx int) {
 			pr.recentlyEvicted[id] = now
 		}
 	}
-	if len(toEvict) > 0 {
-		pr.cycleEvicted += len(toEvict)
-		slog.Info("policy: evicted peers", "network_id", pr.netID, "count", len(toEvict), "rule", d.Rule)
-	}
+	pr.cycleEvicted += len(toEvict)
+	pr.mu.Unlock()
+
+	slog.Info("policy: evicted peers", "network_id", pr.netID, "count", len(toEvict), "rule", d.Rule)
 }
 
 // evictCooldown bounds how long an evicted peer stays out of pr.peers
