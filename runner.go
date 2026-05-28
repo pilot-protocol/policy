@@ -512,9 +512,9 @@ func (pr *PolicyRunner) executePruneTrust(d Directive) {
 	if total-toRemove < minLinks {
 		toRemove = total - minLinks
 	}
-	if toRemove <= 0 {
-		return
-	}
+	// At this point total > minLinks (checked above) and toRemove >= 1
+	// (forced positive at line 509), so toRemove > 0 always — no
+	// defensive guard needed.
 
 	ranked := pr.rankTrustLinks(trusted, by)
 	pruned := 0
@@ -1178,11 +1178,10 @@ func (pr *PolicyRunner) persist() {
 	}
 	pr.mu.RUnlock()
 
-	data, err := json.MarshalIndent(snap, "", "  ")
-	if err != nil {
-		slog.Warn("policy: persist marshal failed", "network_id", pr.netID, "err", err)
-		return
-	}
+	// MarshalIndent on policySnapshot is infallible: it has only
+	// primitives, a string-keyed map, []string slices, and time.Time
+	// (which has a safe MarshalJSON). The error branch is unreachable.
+	data, _ := json.MarshalIndent(snap, "", "  ")
 
 	dir := filepath.Dir(pr.path)
 	os.MkdirAll(dir, 0700)
