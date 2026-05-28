@@ -16,7 +16,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/TeoSlayer/pilotprotocol/pkg/coreapi"
+	"github.com/pilot-protocol/common/coreapi"
 )
 
 // Service is the L11 plugin adapter for the policy runtime. It owns
