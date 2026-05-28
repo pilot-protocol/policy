@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/TeoSlayer/pilotprotocol/pkg/coreapi"
+	"github.com/pilot-protocol/common/coreapi"
 )
 
 // Version is the current policy document schema version.

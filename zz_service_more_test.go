@@ -10,7 +10,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/TeoSlayer/pilotprotocol/pkg/coreapi"
+	"github.com/pilot-protocol/common/coreapi"
 )
 
 const minimalPolicyJSON = `{
