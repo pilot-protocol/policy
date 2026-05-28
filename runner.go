@@ -68,7 +68,15 @@ type policySnapshot struct {
 
 // NewPolicyRunner creates a policy runner for a network with the given compiled policy.
 func NewPolicyRunner(netID uint16, cp *CompiledPolicy, d Runtime) *PolicyRunner {
-	home, _ := os.UserHomeDir()
+	// State directory: PILOT_HOME env wins (lets parallel tests and
+	// alternate-deploy operators point at a per-instance path), else
+	// $HOME/.pilot — the prior default. Without the override every
+	// PolicyRunner for the same netID shared one JSON file on disk
+	// and parallel tests using t.Parallel raced through it.
+	home := os.Getenv("PILOT_HOME")
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
 	path := filepath.Join(home, ".pilot", fmt.Sprintf("policy_%d.json", netID))
 
 	pr := &PolicyRunner{
