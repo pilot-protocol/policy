@@ -175,6 +175,17 @@ func (cp *CompiledPolicy) EvaluatePeerExpr(ruleName string, actionIdx int, peerC
 	return runProgram(prog, peerCtx)
 }
 
+// FailClosed reports whether the engine should deny/reject on expression
+// evaluation errors. When nil in PolicyDocument, defaults to true
+// (fail-closed — more secure). Set fail_closed: false to restore legacy
+// fail-open behaviour.
+func (cp *CompiledPolicy) FailClosed() bool {
+	if cp.Doc.FailClosed == nil {
+		return true // default: fail-closed
+	}
+	return *cp.Doc.FailClosed
+}
+
 // HasRulesFor returns true if the policy has any rules for the given event type.
 func (cp *CompiledPolicy) HasRulesFor(eventType EventType) bool {
 	for _, cr := range cp.rules {
