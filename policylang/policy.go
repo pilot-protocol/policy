@@ -81,9 +81,15 @@ type Rule struct {
 // DefaultVerdict controls gate-event behavior when no rule produces a
 // verdict. Valid values: "allow" (default, backwards-compatible) or "deny"
 // (default-deny; write explicit allow rules).
+//
+// FailClosed controls behavior when an expression evaluation error occurs.
+// When nil (default), the engine fails-closed (DENY on gate errors, skip
+// actions on cycle/join/leave errors). Set fail_closed: false in the JSON
+// to restore legacy fail-open semantics.
 type PolicyDocument struct {
 	Version        int                    `json:"version"`
 	DefaultVerdict string                 `json:"default_verdict,omitempty"`
+	FailClosed     *bool                  `json:"fail_closed,omitempty"`
 	Config         map[string]interface{} `json:"config,omitempty"`
 	Rules          []Rule                 `json:"rules"`
 }
