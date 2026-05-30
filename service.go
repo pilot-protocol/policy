@@ -233,13 +233,14 @@ func (s *Service) startInternal(netID uint16, policyJSON []byte) (*PolicyRunner,
 	}
 
 	s.mu.Lock()
-	if old, ok := s.runners[netID]; ok {
-		old.Stop()
-	}
+	old := s.runners[netID]
 	pr := NewPolicyRunner(netID, cp, s.runtime)
 	pr.Start()
 	s.runners[netID] = pr
 	s.mu.Unlock()
+	if old != nil {
+		old.Stop()
+	}
 
 	slog.Info("policy: started runner", "network_id", netID)
 	return pr, nil
