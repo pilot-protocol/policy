@@ -113,17 +113,12 @@ func TestPin_DefaultVerdictUnrecognized_RejectedByValidate(t *testing.T) {
 	}
 }
 
-// TestPin_EvaluateGate_FailOpenOnEvalError pins the documented fail-open
-// behaviour when the expression engine returns an error mid-evaluation.
-// The reasoning is in runner.go: "// fail open on error" — flipping this to
-// fail-closed without a deliberate review would brick live connections.
-// Pinning the current behaviour so the trade-off is an explicit choice next
-// time, not an accident.
-func TestPin_EvaluateGate_FailOpenOnEvalError(t *testing.T) {
+// TestPin_EvaluateGate_FailClosedOnEvalError pins the fail-closed default
+// behaviour (PILOT-262): when the expression engine returns an error
+// mid-evaluation and fail_closed is not explicitly set, the gate must
+// DENY (fail-closed) — the more secure default.
+func TestPin_EvaluateGate_FailClosedOnEvalError(t *testing.T) {
 	t.Parallel()
-	// Use a rule whose match references a function that exists at
-	// compile but blows up at runtime — duration("nope") returns an
-	// error inside expr, which surfaces from runProgram.
 	doc := &PolicyDocument{
 		Version: 1,
 		Rules: []Rule{
@@ -136,14 +131,46 @@ func TestPin_EvaluateGate_FailOpenOnEvalError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
-	pr := &PolicyRunner{netID: 1, compiled: cp, peers: map[uint32]*managedPeer{}}
+	// Default (no fail_closed field) → fail-closed → deny on error.
+	if cp.FailClosed() != true {
+		t.Fatal("default FailClosed must be true")
+	}
+	pr := &PolicyRunner{netID: 1, compiled: cp, peers: map[uint32]*managedPeer{}, runtime: &fakeRuntime{}}
+	if pr.EvaluateGate(EventConnect, map[string]interface{}{
+		"port": 80, "peer_id": 1, "network_id": 1,
+		"peer_tags": []string{}, "peer_age_s": 0.0, "members": 0,
+	}) {
+		t.Fatal("fail-closed default: eval error must deny, got allow")
+	}
+}
 
-	// Eval error → EvaluateGate returns true (fail-open).
+// TestPin_EvaluateGate_FailOpenExplicit preserves the legacy fail-open
+// pathway when fail_closed: false is explicitly set in the policy document.
+func TestPin_EvaluateGate_FailOpenExplicit(t *testing.T) {
+	t.Parallel()
+	f := false
+	doc := &PolicyDocument{
+		Version:    1,
+		FailClosed: &f,
+		Rules: []Rule{
+			{Name: "boom", On: EventConnect, Match: `duration("nope") > 0`, Actions: []Action{
+				{Type: ActionDeny},
+			}},
+		},
+	}
+	cp, err := Compile(doc)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if cp.FailClosed() != false {
+		t.Fatal("explicit fail_closed: false must report false")
+	}
+	pr := &PolicyRunner{netID: 1, compiled: cp, peers: map[uint32]*managedPeer{}, runtime: &fakeRuntime{}}
 	if !pr.EvaluateGate(EventConnect, map[string]interface{}{
 		"port": 80, "peer_id": 1, "network_id": 1,
 		"peer_tags": []string{}, "peer_age_s": 0.0, "members": 0,
 	}) {
-		t.Fatal("fail-open contract: eval error must allow, got deny")
+		t.Fatal("explicit fail_open: eval error must allow, got deny")
 	}
 }
 
@@ -205,14 +232,15 @@ func TestPin_ExprTimeout_GateBoundedLatency(t *testing.T) {
 // than tearing down the goroutine. The pkg-level test in policylang already
 // covers this; this is the integration-level guard from the runner side so
 // the *whole stack* is exercised, not just the helper.
+//
+// Uses fail_closed: false so the legacy allow-on-error verdict path stays
+// tested. The no-panic invariant is what matters here.
 func TestPin_ExprTimeout_PanicSurfacesAsError(t *testing.T) {
 	t.Parallel()
-	// Compile a rule whose expression accesses a field absent from ctx — under
-	// expr.AllowUndefinedVariables this becomes nil and dereference is the
-	// usual panic candidate. If it doesn't panic in this expr version, the
-	// test still passes (no crash is the invariant).
+	failOpen := false
 	doc := &PolicyDocument{
-		Version: 1,
+		Version:    1,
+		FailClosed: &failOpen,
 		Rules: []Rule{
 			{Name: "boom", On: EventConnect,
 				Match:   `peer_tags[10] == "x"`, // OOB on empty peer_tags
@@ -223,19 +251,19 @@ func TestPin_ExprTimeout_PanicSurfacesAsError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
-	pr := &PolicyRunner{netID: 1, compiled: cp, peers: map[uint32]*managedPeer{}}
+	pr := &PolicyRunner{netID: 1, compiled: cp, peers: map[uint32]*managedPeer{}, runtime: &fakeRuntime{}}
 
 	// Must not panic.
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("BUG: gate panicked instead of fail-open: %v", r)
+			t.Fatalf("BUG: gate panicked: %v", r)
 		}
 	}()
 	if !pr.EvaluateGate(EventConnect, map[string]interface{}{
 		"port": 80, "peer_id": 1, "network_id": 1,
 		"peer_tags": []string{}, "peer_age_s": 0.0, "members": 0,
 	}) {
-		t.Fatal("OOB index → expected fail-open allow")
+		t.Fatal("explicit fail_open: OOB → must allow")
 	}
 }
 

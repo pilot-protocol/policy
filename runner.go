@@ -215,8 +215,17 @@ func mergeTags(nodeInfoTags, policyTags []string) []string {
 func (pr *PolicyRunner) EvaluateGate(eventType EventType, ctx map[string]interface{}) bool {
 	dirs, err := pr.compiled.Evaluate(eventType, ctx)
 	if err != nil {
-		slog.Warn("policy: gate eval error", "network_id", pr.netID, "event", eventType, "err", err)
-		return true // fail open on error
+		if pr.compiled.FailClosed() {
+			slog.Error("policy: gate eval error — denying (fail_closed)", "network_id", pr.netID, "event", eventType, "err", err)
+			pr.runtime.PublishEvent("policy.eval_error", map[string]interface{}{
+				"network_id": pr.netID,
+				"event":      eventType,
+				"error":      err.Error(),
+			})
+			return false
+		}
+		slog.Warn("policy: gate eval error — allowing (fail_open)", "network_id", pr.netID, "event", eventType, "err", err)
+		return true
 	}
 
 	// Execute side effects (tag, etc.) before the verdict.
@@ -258,6 +267,9 @@ func (pr *PolicyRunner) EvaluateGate(eventType EventType, ctx map[string]interfa
 func (pr *PolicyRunner) evaluatePerPeerCycle(ctx map[string]interface{}) {
 	dirs, err := pr.compiled.Evaluate(EventCycle, ctx)
 	if err != nil {
+		if pr.compiled.FailClosed() {
+			slog.Error("policy: per-peer cycle eval error — skipping (fail_closed)", "network_id", pr.netID, "err", err)
+		}
 		return
 	}
 	for _, d := range dirs {
@@ -272,7 +284,16 @@ func (pr *PolicyRunner) evaluatePerPeerCycle(ctx map[string]interface{}) {
 func (pr *PolicyRunner) EvaluateActions(eventType EventType, ctx map[string]interface{}) {
 	dirs, err := pr.compiled.Evaluate(eventType, ctx)
 	if err != nil {
-		slog.Warn("policy: action eval error", "network_id", pr.netID, "event", eventType, "err", err)
+		if pr.compiled.FailClosed() {
+			slog.Error("policy: action eval error — skipping directives (fail_closed)", "network_id", pr.netID, "event", eventType, "err", err)
+			pr.runtime.PublishEvent("policy.eval_error", map[string]interface{}{
+				"network_id": pr.netID,
+				"event":      eventType,
+				"error":      err.Error(),
+			})
+		} else {
+			slog.Warn("policy: action eval error — skipping directives (fail_open)", "network_id", pr.netID, "event", eventType, "err", err)
+		}
 		return
 	}
 
