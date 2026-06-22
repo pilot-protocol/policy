@@ -7,22 +7,18 @@ import (
 	"testing"
 )
 
-// TestLoadPersisted_UserHomeDirError covers service.go:268 — UserHomeDir
-// returns an error when HOME (or its platform equivalent) is unset.
-func TestLoadPersisted_UserHomeDirError(t *testing.T) {
-	// Cannot t.Parallel — mutates HOME env at process level.
-	// t.Setenv("", "") would do it on macOS/linux; explicit unset is clearer.
-	prev, hadHome := os.LookupEnv("HOME")
-	os.Unsetenv("HOME")
-	t.Cleanup(func() {
-		if hadHome {
-			os.Setenv("HOME", prev)
-		}
-	})
+// TestLoadPersisted_MissingDirNoError covers the reconciled path
+// convention: LoadPersisted resolves its directory via stateDir()
+// (PILOT_HOME-first, same as NewPolicyRunner). When that directory does
+// not exist, LoadPersisted is a graceful no-op rather than an error.
+func TestLoadPersisted_MissingDirNoError(t *testing.T) {
+	// Cannot t.Parallel — mutates PILOT_HOME env at process level.
+	tmp := t.TempDir() // exists, but $PILOT_HOME/.pilot does not
+	t.Setenv("PILOT_HOME", tmp)
 
 	s := NewService(&fakeRuntime{})
-	if err := s.LoadPersisted(); err == nil {
-		t.Error("expected UserHomeDir error when HOME is unset")
+	if err := s.LoadPersisted(); err != nil {
+		t.Errorf("LoadPersisted with missing state dir should be a no-op, got %v", err)
 	}
 }
 

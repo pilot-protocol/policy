@@ -38,6 +38,10 @@ type Service struct {
 	// were passed to Start (e.g. unit tests that bypass the runtime).
 	subStop func()
 	subDone chan struct{}
+
+	// persistedNetworks holds the network IDs whose on-disk state was
+	// discovered by the last LoadPersisted call. Guarded by mu.
+	persistedNetworks map[uint16]struct{}
 }
 
 func NewService(runtime Runtime) *Service {
@@ -260,16 +264,25 @@ func (s *Service) stopInternal(netID uint16) {
 	}
 }
 
-// LoadPersisted scans ~/.pilot/policy_*.json and re-creates a runner
-// for each. Called from daemon-Start after the registry connection is
-// up. Each file's name is `policy_<netID>.json`; the contents are the
-// policy JSON.
+// LoadPersisted scans the state directory for policy_<netID>.json
+// snapshots and records which networks have persisted state. Called
+// from daemon-Start after the registry connection is up.
+//
+// The directory MUST be the same one NewPolicyRunner persists to —
+// resolved via stateDir() so PILOT_HOME is honored consistently. (This
+// previously called os.UserHomeDir directly, so when PILOT_HOME was set
+// the scan looked in the wrong place and the persisted state was
+// silently ignored.)
+//
+// A snapshot holds per-peer scores/history, not the compiled policy, so
+// a runner can only be rebuilt once its network rejoins (handled by
+// handleNetworkJoined -> startInternal -> NewPolicyRunner, whose load()
+// re-applies the matching snapshot from the same dir). Here we validate
+// each discovered file by unmarshaling it into a policySnapshot and
+// remember the set of persisted network IDs so callers can tell which
+// networks carry restorable state.
 func (s *Service) LoadPersisted() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	dir := filepath.Join(home, ".pilot")
+	dir := stateDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		// No directory yet — nothing to load.
@@ -278,20 +291,47 @@ func (s *Service) LoadPersisted() error {
 		}
 		return err
 	}
+	persisted := make(map[uint16]struct{})
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasPrefix(name, "policy_") || !strings.HasSuffix(name, ".json") {
+		if e.IsDir() || !strings.HasPrefix(name, "policy_") || !strings.HasSuffix(name, ".json") {
 			continue
 		}
-		// State files for individual runners are named
-		// `policy_<netID>.json`. Compiled policy bytes live separately
-		// (the persisted state holds peers/scores, not the compiled
-		// policy). LoadPersisted is invoked after the daemon's startup
-		// path that re-registers networks; runners get re-created via
-		// Start when networks rejoin. Nothing else to do here today.
-		_ = name
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			slog.Warn("policy: failed to read persisted state", "file", name, "err", err)
+			continue
+		}
+		if len(data) == 0 {
+			continue
+		}
+		var snap policySnapshot
+		if err := json.Unmarshal(data, &snap); err != nil {
+			slog.Warn("policy: skipping malformed persisted state", "file", name, "err", err)
+			continue
+		}
+		persisted[snap.NetworkID] = struct{}{}
+		slog.Info("policy: discovered persisted state",
+			"network_id", snap.NetworkID, "peers", len(snap.Peers))
 	}
+
+	s.mu.Lock()
+	s.persistedNetworks = persisted
+	s.mu.Unlock()
 	return nil
+}
+
+// PersistedNetworks reports the set of network IDs that have on-disk
+// state discovered by the last LoadPersisted call. Used by the daemon
+// to know which networks carry restorable per-peer scores.
+func (s *Service) PersistedNetworks() []uint16 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]uint16, 0, len(s.persistedNetworks))
+	for id := range s.persistedNetworks {
+		out = append(out, id)
+	}
+	return out
 }
 
 // --- coreapi.PolicyManager interface impl ---
