@@ -989,7 +989,7 @@ func TestLoadPersisted_ReaddirError(t *testing.T) {
 	if err := os.WriteFile(pilotPath, []byte("not a dir"), 0600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	t.Setenv("HOME", tmp)
+	t.Setenv("PILOT_HOME", tmp)
 	s := NewService(&fakeRuntime{})
 	if err := s.LoadPersisted(); err == nil {
 		t.Error("expected ReadDir error on file-instead-of-dir, got nil")
