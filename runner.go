@@ -47,6 +47,14 @@ type PolicyRunner struct {
 	done   chan struct{}
 	path   string // persistence path (~/.pilot/policy_<netID>.json)
 
+	// startStopMu serializes Start/Stop and guards `started`. Stop()
+	// before Start() must be a safe no-op: cycleLoop (which closes
+	// `done`) never runs in that case, so an unconditional `<-pr.done`
+	// would block forever.
+	startStopMu sync.Mutex
+	started     bool
+	stopped     bool
+
 	// fetchMembers backoff. Some networks are too large for the registry's
 	// list_nodes response to fit a single read window — fetchMembers EOFs
 	// every 5s tick and pounds the regConn mutex, which adds 5+ seconds
@@ -66,18 +74,34 @@ type policySnapshot struct {
 	CycleNum  int                     `json:"cycle_num"`
 }
 
-// NewPolicyRunner creates a policy runner for a network with the given compiled policy.
-func NewPolicyRunner(netID uint16, cp *CompiledPolicy, d Runtime) *PolicyRunner {
-	// State directory: PILOT_HOME env wins (lets parallel tests and
-	// alternate-deploy operators point at a per-instance path), else
-	// $HOME/.pilot — the prior default. Without the override every
-	// PolicyRunner for the same netID shared one JSON file on disk
-	// and parallel tests using t.Parallel raced through it.
+// stateDir returns the directory holding persisted runner state.
+//
+// PILOT_HOME env wins (lets parallel tests and alternate-deploy
+// operators point at a per-instance path), else $HOME/.pilot — the
+// prior default. Without the override every PolicyRunner for the same
+// netID shared one JSON file on disk and parallel tests using
+// t.Parallel raced through it.
+//
+// NewPolicyRunner and Service.LoadPersisted MUST agree on this path —
+// they previously disagreed (one honored PILOT_HOME, the other called
+// os.UserHomeDir directly), so files written under PILOT_HOME were
+// invisible to the scan and never re-applied.
+func stateDir() string {
 	home := os.Getenv("PILOT_HOME")
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	path := filepath.Join(home, ".pilot", fmt.Sprintf("policy_%d.json", netID))
+	return filepath.Join(home, ".pilot")
+}
+
+// statePathForNetwork is the persisted-state file for a single network.
+func statePathForNetwork(netID uint16) string {
+	return filepath.Join(stateDir(), fmt.Sprintf("policy_%d.json", netID))
+}
+
+// NewPolicyRunner creates a policy runner for a network with the given compiled policy.
+func NewPolicyRunner(netID uint16, cp *CompiledPolicy, d Runtime) *PolicyRunner {
+	path := statePathForNetwork(netID)
 
 	pr := &PolicyRunner{
 		netID:           netID,
@@ -99,13 +123,32 @@ func NewPolicyRunner(netID uint16, cp *CompiledPolicy, d Runtime) *PolicyRunner 
 }
 
 // Start begins the cycle loop if the policy has cycle rules.
+// Calling Start after Stop is a no-op (a stopped runner stays stopped).
 func (pr *PolicyRunner) Start() {
+	pr.startStopMu.Lock()
+	defer pr.startStopMu.Unlock()
+	if pr.started || pr.stopped {
+		return
+	}
+	pr.started = true
 	go pr.cycleLoop()
 	slog.Info("policy runner started", "network_id", pr.netID)
 }
 
-// Stop signals the cycle loop to exit and waits for it.
+// Stop signals the cycle loop to exit and waits for it. Stop before
+// Start is a safe no-op: cycleLoop never ran, so `done` would never be
+// closed and waiting on it would deadlock.
 func (pr *PolicyRunner) Stop() {
+	pr.startStopMu.Lock()
+	defer pr.startStopMu.Unlock()
+	if pr.stopped {
+		return
+	}
+	pr.stopped = true
+	if !pr.started {
+		// cycleLoop was never launched; nothing to signal or wait on.
+		return
+	}
 	select {
 	case <-pr.stopCh:
 	default:
