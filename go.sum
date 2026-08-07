@@ -1,4 +1,4 @@
 github.com/expr-lang/expr v1.17.8 h1:W1loDTT+0PQf5YteHSTpju2qfUfNoBt4yw9+wOEU9VM=
 github.com/expr-lang/expr v1.17.8/go.mod h1:8/vRC7+7HBzESEqt5kKpYXxrxkr31SaO8r40VO/1IT4=
-github.com/pilot-protocol/common v0.5.12 h1:ZQ7v8oX0VYtEcluraQZvqrYPMvRIxjixSZtNz8Xo5Uc=
-github.com/pilot-protocol/common v0.5.12/go.mod h1:Ybc6f1A37s3ShoEh1nBMVL9DPyYlxvkqPTvtbxaNWg4=
+github.com/pilot-protocol/common v0.5.13 h1:h9NmPh37ZZujktpSAwgq2H2ai7jG240nQTetGNWtZ3U=
+github.com/pilot-protocol/common v0.5.13/go.mod h1:Ybc6f1A37s3ShoEh1nBMVL9DPyYlxvkqPTvtbxaNWg4=
