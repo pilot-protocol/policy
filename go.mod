@@ -1,8 +1,8 @@
 module github.com/pilot-protocol/policy
 
-go 1.25.12
+go 1.25.13
 
 require (
 	github.com/expr-lang/expr v1.17.8
-	github.com/pilot-protocol/common v0.5.13
+	github.com/pilot-protocol/common v0.5.14
 )
