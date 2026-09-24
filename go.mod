@@ -4,5 +4,5 @@ go 1.25.13
 
 require (
 	github.com/expr-lang/expr v1.17.8
-	github.com/pilot-protocol/common v0.5.14
+	github.com/pilot-protocol/common v0.5.15
 )
